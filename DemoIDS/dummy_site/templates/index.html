@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Demo IDS — Form</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="container">
+    <header class="header">
+      <h1>Demo IDS</h1>
+      <p class="muted">Formu doldurup <strong>Gönder</strong> ile modelden gerçek zamanlı tahmin al. Hızlı test için önayar butonlarını kullan. <em style="display:block;margin-top:6px;color:var(--muted)">Ondalık yazarken <strong>nokta (.)</strong> kullanabilirsiniz; virgül (,) otomatik düzeltilecektir.</em></p>
+    </header>
+
+    <section class="card">
+      <form id="attackForm" class="form">
+        <div class="row">
+          <label for="duration">Duration (s)</label>
+          <input id="duration" name="duration" type="text" inputmode="decimal" value="0.5" required>
+          <small class="hint">İstek/süre ile ilgili örnek sayı (örnek: <code>0.3</code> veya <code>0,3</code>).</small>
+        </div>
+
+        <div class="row">
+          <label for="src_bytes">Src bytes</label>
+          <input id="src_bytes" name="src_bytes" type="text" inputmode="numeric" value="10" required>
+        </div>
+
+        <div class="row">
+          <label for="dst_bytes">Dst bytes</label>
+          <input id="dst_bytes" name="dst_bytes" type="text" inputmode="numeric" value="5" required>
+        </div>
+
+        <div class="row">
+          <label for="pkt_rate">Packet rate</label>
+          <input id="pkt_rate" name="pkt_rate" type="text" inputmode="decimal" value="12" required>
+        </div>
+
+        <div class="row">
+          <label for="failed_logins">Failed logins</label>
+          <input id="failed_logins" name="failed_logins" type="text" inputmode="numeric" value="0" required>
+          <small class="hint">Brute-force benzeri davranışlar için yüksek değer.</small>
+        </div>
+
+        <div class="controls">
+          <div class="preset-group">
+            <!-- Benign kaldırıldı, yerine Portscan eklendi -->
+            <button type="button" class="btn small" data-preset="portscan">Önayar: Portscan</button>
+            <button type="button" class="btn small" data-preset="brute">Önayar: Brute Force</button>
+            <button type="button" class="btn small" data-preset="ddos">Önayar: DDoS</button>
+          </div>
+
+          <div class="action-group">
+            <button id="submitBtn" type="submit" class="btn primary">Gönder</button>
+            <button id="clearBtn" type="button" class="btn">Temizle</button>
+          </div>
+        </div>
+
+      </form>
+    </section>
+
+    <section class="card results" aria-live="polite">
+      <h2>Sonuç</h2>
+
+      <div id="summary" class="summary">
+        <div id="badge" class="badge neutral">---</div>
+        <div id="scoreWrap" class="score-wrap" style="display:none;">
+          <div class="score-label">Confidence</div>
+          <div class="score-bar-bg"><div id="scoreBar" class="score-bar"></div></div>
+        </div>
+      </div>
+
+      <pre id="jsonOut" class="jsonout">{ "waiting": "submit the form" }</pre>
+
+      <div id="history" class="history">
+        <h3>Geçmiş (bu oturum)</h3>
+        <ul id="historyList"></ul>
+      </div>
+    </section>
+
+    <footer class="footer muted">
+      <small>Demo: gerçek veri ile test etmeyin. Üretim amaçlı değildir.</small>
+    </footer>
+  </main>
+
+<script>
+const form = document.getElementById('attackForm');
+const jsonOut = document.getElementById('jsonOut');
+const badge = document.getElementById('badge');
+const scoreWrap = document.getElementById('scoreWrap');
+const scoreBar = document.getElementById('scoreBar');
+const submitBtn = document.getElementById('submitBtn');
+const historyList = document.getElementById('historyList');
+
+function setBadge(label) {
+  badge.className = 'badge';
+  if (label === 'ATTACK') {
+    badge.classList.add('attack'); badge.textContent = 'ATTACK';
+  } else if (label === 'BENIGN') {
+    badge.classList.add('benign'); badge.textContent = 'BENIGN';
+  } else {
+    badge.classList.add('neutral'); badge.textContent = '---';
+  }
+}
+
+function setScore(n) {
+  scoreWrap.style.display = 'block';
+  const pct = Math.max(0, Math.min(100, Math.round(n*100)));
+  scoreBar.style.width = pct + '%';
+  scoreBar.textContent = pct + '%';
+}
+
+function pushHistory(obj) {
+  const li = document.createElement('li');
+  li.innerHTML = `<strong>${obj.binary_label}</strong> — ${obj.attack_type || '-'} — ${new Date().toLocaleTimeString()}`;
+  historyList.prepend(li);
+  while (historyList.children.length > 8) historyList.removeChild(historyList.lastChild);
+}
+
+// normalize input (0,3 -> 0.3)
+function toNumber(v) {
+  if (v === null || v === undefined) return NaN;
+  const s = String(v).trim().replace(',', '.');
+  return Number(s);
+}
+
+function fillPreset(name){
+  if(name==='portscan'){
+    // Portscan: çok kısa duration, yüksek pkt_rate
+    document.getElementById('duration').value = '0.05';
+    document.getElementById('src_bytes').value = '10';
+    document.getElementById('dst_bytes').value = '10';
+    document.getElementById('pkt_rate').value = '200';
+    document.getElementById('failed_logins').value = '0';
+  } else if(name==='brute'){
+    document.getElementById('duration').value = '2.0';
+    document.getElementById('src_bytes').value = '10';
+    document.getElementById('dst_bytes').value = '5';
+    document.getElementById('pkt_rate').value = '0.5';
+    document.getElementById('failed_logins').value = '6';
+  } else if(name==='ddos'){
+    document.getElementById('duration').value = '1.0';
+    document.getElementById('src_bytes').value = '5000';
+    document.getElementById('dst_bytes').value = '10';
+    document.getElementById('pkt_rate').value = '1200';
+    document.getElementById('failed_logins').value = '0';
+  }
+}
+
+document.querySelectorAll('[data-preset]').forEach(b=>{
+  b.addEventListener('click', ()=> fillPreset(b.getAttribute('data-preset')));
+});
+
+document.getElementById('clearBtn').addEventListener('click', ()=>{
+  form.reset();
+  setBadge('---');
+  scoreWrap.style.display = 'none';
+  jsonOut.textContent = '{ "waiting": "submit the form" }';
+});
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  const d  = toNumber(document.getElementById('duration').value);
+  const sb = toNumber(document.getElementById('src_bytes').value);
+  const db = toNumber(document.getElementById('dst_bytes').value);
+  const pr = toNumber(document.getElementById('pkt_rate').value);
+  const fl = toNumber(document.getElementById('failed_logins').value);
+
+  if ([d,sb,db,pr,fl].some(x => Number.isNaN(x))) {
+    alert('Lütfen tüm alanları doğru şekilde doldur. Ondalık için nokta (.) kullanın veya virgül (,) yazdıysanız otomatik düzeltilecektir.');
+    return;
+  }
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Gönderiliyor...';
+
+  const payload = { duration: d, src_bytes: sb, dst_bytes: db, pkt_rate: pr, failed_logins: fl };
+
+  try {
+    const res = await fetch('/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    jsonOut.textContent = JSON.stringify(data, null, 2);
+
+    setBadge(data.binary_label || '---');
+    if (data.binary_score !== undefined) setScore(data.binary_score);
+    pushHistory(data);
+
+  } catch (err) {
+    jsonOut.textContent = JSON.stringify({ error: err.message }, null, 2);
+    setBadge('---');
+    scoreWrap.style.display = 'none';
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Gönder';
+  }
+});
+</script>
+</body>
+</html>
